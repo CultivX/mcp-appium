@@ -1,12 +1,13 @@
 {
-  "name": "@cultivx/app-xray-mcp",
+  "name": "@cultivx/mobile-xray-mcp",
   "version": "1.0.0",
   "description": "An open source TypeScript project",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
+  "bugs": "https://github.com/CultivX/mobile-xray-mcp/issues",
   "bin": {
-    "app-xray-mcp": "dist/index.js"
+    "mobile-xray-mcp": "dist/index.js"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -33,12 +34,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "https://github.com/CultivX/mobile-xray-mcp"
   },
-  "bugs": {
-    "url": ""
-  },
-  "homepage": "",
+  "homepage": "https://github.com/CultivX/mobile-xray-mcp",
   "files": [
     "dist",
     "README.md",
