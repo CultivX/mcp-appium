@@ -1,0 +1,414 @@
+name: Manual Stable Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type (or "none" to use current package.json version)'
+        required: true
+        type: choice
+        options:
+          - none
+          - patch
+          - minor
+          - major
+        default: patch
+      custom_version:
+        description: 'Custom version (optional - overrides version_bump if provided)'
+        required: false
+        type: string
+      release_notes:
+        description: 'Release notes (optional - will use auto-generated if empty)'
+        required: false
+        type: string
+      publish_to_npm:
+        description: 'Publish to npm after creating release'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: read
+  id-token: write
+
+jobs:
+  determine-version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      current_version: ${{ steps.version.outputs.current_version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Determine version
+        id: version
+        run: |
+          # Get current version from package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "current_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+          echo "📦 Current package.json version: ${CURRENT_VERSION}"
+
+          # Determine target version
+          if [ -n "${{ inputs.custom_version }}" ]; then
+            # Use custom version if provided
+            VERSION="${{ inputs.custom_version }}"
+            # Remove v prefix if present
+            VERSION=${VERSION#v}
+            echo "🎯 Using custom version: ${VERSION}"
+          elif [ "${{ inputs.version_bump }}" = "none" ]; then
+            # Use current version from package.json
+            VERSION="${CURRENT_VERSION}"
+            echo "📌 Using current package.json version: ${VERSION}"
+          else
+            # Bump version using npm version command
+            echo "⬆️ Bumping version (${{ inputs.version_bump }}) from ${CURRENT_VERSION}..."
+            NEW_VERSION=$(npm version ${{ inputs.version_bump }} --no-git-tag-version)
+            VERSION=${NEW_VERSION#v}
+            echo "📦 New version: ${VERSION}"
+          fi
+
+          # Validate semantic version format
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Please use semantic versioning format: X.Y.Z (e.g., 1.0.0)"
+            exit 1
+          fi
+
+          TAG="v${VERSION}"
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "✅ Target version: ${VERSION} (tag: ${TAG})"
+
+      - name: Check if tag exists
+        run: |
+          if git rev-parse "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "❌ Tag ${{ steps.version.outputs.tag }} already exists!"
+            echo "Choose a different version bump or delete the existing tag first."
+            echo "Current version: ${{ steps.version.outputs.current_version }}"
+            echo "Target version: ${{ steps.version.outputs.version }}"
+            exit 1
+          fi
+          echo "✅ Tag ${{ steps.version.outputs.tag }} is available"
+
+      - name: Commit version bump
+        if: inputs.version_bump != 'none' && inputs.custom_version == ''
+        run: |
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Check if there are changes to commit
+          if git diff --quiet package.json; then
+            echo "📝 No version changes to commit"
+          else
+            echo "📝 Committing version bump to ${{ steps.version.outputs.version }}"
+            git add package.json package-lock.json
+            git commit -m "chore: bump version to ${{ steps.version.outputs.version }} [skip ci]
+
+            🤖 Auto-committed by manual stable release workflow
+
+            - Previous version: ${{ steps.version.outputs.current_version }}
+            - New version: ${{ steps.version.outputs.version }}
+            - Bump type: ${{ inputs.version_bump }}"
+
+            # Push the commit
+            git push origin main
+            echo "✅ Version bump committed and pushed to main"
+          fi
+
+  promote-rc-release:
+    name: Promote RC to Stable Release
+    runs-on: ubuntu-latest
+    needs: determine-version
+    outputs:
+      release_url: ${{ steps.create_release.outputs.release_url }}
+      asset_name: ${{ steps.prepare.outputs.asset_name }}
+      source_rc: ${{ steps.find_rc.outputs.source_rc }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Find latest RC release
+        id: find_rc
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔍 Finding latest RC release to promote..."
+
+          # Get the latest prerelease (RC)
+          LATEST_RC=$(gh release list --repo ${{ github.repository }} --limit 10 --json tagName,isPrerelease,publishedAt | jq -r '.[] | select(.isPrerelease == true) | .tagName' | head -1)
+
+          if [ -z "$LATEST_RC" ]; then
+            echo "❌ No RC releases found to promote!"
+            echo "Please create an RC release first by pushing to main branch."
+            exit 1
+          fi
+
+          echo "source_rc=${LATEST_RC}" >> $GITHUB_OUTPUT
+          echo "✅ Found latest RC: ${LATEST_RC}"
+
+          # Show RC details
+          echo "📋 RC Release details:"
+          gh release view "${LATEST_RC}" --repo ${{ github.repository }} --json name,tagName,publishedAt,assets | jq -r '"Name: " + .name, "Tag: " + .tagName, "Published: " + .publishedAt, "Assets: " + (.assets | length | tostring)'
+
+      - name: Download and prepare RC artifact
+        id: prepare
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SOURCE_RC="${{ steps.find_rc.outputs.source_rc }}"
+          TARGET_VERSION="${{ needs.determine-version.outputs.version }}"
+          TARGET_ASSET_NAME="mobile-xray-mcp-${TARGET_VERSION}.tar.gz"
+
+          echo "📦 Downloading RC artifact from ${SOURCE_RC}..."
+
+          # List available assets
+          echo "Available assets in ${SOURCE_RC}:"
+          gh release view "${SOURCE_RC}" --repo ${{ github.repository }} --json assets | jq -r '.assets[].name'
+
+          # Download RC artifact (find the mobile-xray-mcp tarball)
+          RC_ASSET=$(gh release view "${SOURCE_RC}" --repo ${{ github.repository }} --json assets | jq -r '.assets[] | select(.name | contains("mobile-xray-mcp-")) | .name' | head -1)
+
+          if [ -z "$RC_ASSET" ]; then
+            echo "❌ No mobile-xray-mcp asset found in RC release ${SOURCE_RC}"
+            exit 1
+          fi
+
+          echo "📥 Downloading: ${RC_ASSET}"
+          gh release download "${SOURCE_RC}" --repo ${{ github.repository }} --pattern "${RC_ASSET}"
+
+          # Extract and update version
+          echo "📦 Extracting and updating package version..."
+          mkdir -p release-package
+          tar -xzf "${RC_ASSET}" -C release-package
+
+          # Update package.json version to target version
+          cd release-package
+          npm version "${TARGET_VERSION}" --no-git-tag-version
+          echo "✅ Updated package.json: $(cat package.json | jq -r .version)"
+
+          # Repackage with new version
+          cd ..
+          tar -czf "${TARGET_ASSET_NAME}" -C release-package .
+
+          echo "asset_name=${TARGET_ASSET_NAME}" >> $GITHUB_OUTPUT
+          echo "✅ Prepared stable release package: ${TARGET_ASSET_NAME}"
+
+          # Show package contents
+          echo "📋 Package contents:"
+          ls -la release-package/ | head -10
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get commits since last release
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            # No previous tags, get recent commits
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --reverse --max-count=10)
+          else
+            # Get commits since last tag
+            CHANGELOG=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)" --reverse)
+          fi
+
+          # If no commits since last tag, use a default message
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- Promoted from RC release"
+          fi
+
+          # Escape for GitHub output
+          CHANGELOG="${CHANGELOG//'%'/'%25'}"
+          CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
+          CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+
+          echo "changelog=${CHANGELOG}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        id: create_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.determine-version.outputs.version }}"
+          TAG="${{ needs.determine-version.outputs.tag }}"
+          ASSET_NAME="${{ steps.prepare.outputs.asset_name }}"
+          SOURCE_RC="${{ steps.find_rc.outputs.source_rc }}"
+
+          # Use custom release notes if provided, otherwise use auto-generated
+          if [ -n "${{ inputs.release_notes }}" ]; then
+            RELEASE_NOTES="${{ inputs.release_notes }}"
+          else
+            RELEASE_NOTES="🚀 **Stable Release v${VERSION}**
+
+          **Build:** #${{ github.run_number }}
+          **Promoted from:** ${SOURCE_RC}
+
+          ## Installation:
+
+          **Install via npx (recommended for MCP):**
+          \`\`\`bash
+          npx @cultivx/mobile-xray-mcp
+          \`\`\`
+
+          **MCP Configuration:**
+          \`\`\`json
+          {
+            \"mcpServers\": {
+              \"mobile-xray\": {
+                \"command\": \"npx\",
+                \"args\": [\"-y\", \"@cultivx/mobile-xray-mcp\"]
+              }
+            }
+          }
+          \`\`\`
+
+          **Or download and run locally:**
+          \`\`\`bash
+          wget https://github.com/${{ github.repository }}/releases/download/${TAG}/${ASSET_NAME}
+          tar -xzf ${ASSET_NAME}
+          cd mobile-xray-mcp
+          node dist/index.js
+          \`\`\`"
+          fi
+
+          # Create release notes file
+          cat > release_notes.md << EOF
+          ${RELEASE_NOTES}
+          EOF
+
+          # Create the stable release
+          echo "Creating stable release ${TAG}..."
+          gh release create "${TAG}" \
+            --title "Stable Release v${VERSION}" \
+            --notes-file release_notes.md \
+            "./${ASSET_NAME}"
+
+          echo "✅ Release created successfully!"
+
+          # Get release URL
+          RELEASE_URL=$(gh release view "${TAG}" --json url --jq .url)
+          echo "release_url=${RELEASE_URL}" >> $GITHUB_OUTPUT
+
+  publish-to-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [determine-version, promote-rc-release]
+    if: inputs.publish_to_npm == true
+
+    steps:
+      - name: Setup Node.js for npm
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download and extract release package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.determine-version.outputs.tag }}"
+          ASSET_NAME="${{ needs.promote-rc-release.outputs.asset_name }}"
+
+          echo "Downloading release package..."
+          gh release download "${TAG}" --repo ${{ github.repository }} --pattern "${ASSET_NAME}"
+
+          # Extract package
+          mkdir -p npm-package
+          tar -xzf "${ASSET_NAME}" -C npm-package
+
+          echo "✅ Package extracted"
+          ls -la npm-package/
+
+      - name: Publish to npm
+        run: |
+          cd npm-package
+          echo "🚀 Publishing @cultivx/mobile-xray-mcp@${{ needs.determine-version.outputs.version }} to npm..."
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify publication
+        run: |
+          echo "🔍 Verifying npm publication..."
+          sleep 10
+          npm info @cultivx/mobile-xray-mcp@${{ needs.determine-version.outputs.version }} --json | jq -r '{"name": .name, "version": .version, "publishedAt": .time.modified}' || echo "Package may take a few minutes to appear"
+
+  notify-success:
+    name: Notify Success
+    runs-on: ubuntu-latest
+    needs: [determine-version, promote-rc-release, publish-to-npm]
+    if: always() && (needs.promote-rc-release.result == 'success')
+
+    steps:
+      - name: Create success comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const wasPublished = '${{ needs.publish-to-npm.result }}' === 'success';
+            const version = '${{ needs.determine-version.outputs.version }}';
+            const currentVersion = '${{ needs.determine-version.outputs.current_version }}';
+            const releaseUrl = '${{ needs.promote-rc-release.outputs.release_url }}';
+            const sourceRc = '${{ needs.promote-rc-release.outputs.source_rc }}';
+            const versionBump = '${{ inputs.version_bump }}';
+            const wasVersionBumped = versionBump !== 'none' && '${{ inputs.custom_version }}' === '';
+
+            let body = `🎉 **Manual Stable Release v${version} Created Successfully!**
+
+            📦 **Version**: ${currentVersion} → ${version}
+            🔄 **Promoted from**: ${sourceRc}`;
+
+            if (wasVersionBumped) {
+              body += `
+            📝 **Auto-committed**: Version bump (${versionBump}) committed to main branch`;
+            }
+
+            body += `
+            ✅ **GitHub Release**: [v${version}](${releaseUrl})
+            ✅ **Release Artifact**: Available for download`;
+
+            if (wasPublished) {
+              body += `
+            ✅ **npm**: Published to [@cultivx/mobile-xray-mcp@${version}](https://www.npmjs.com/package/@cultivx/mobile-xray-mcp)
+
+            **Quick Start:**
+            \`\`\`bash
+            npx @cultivx/mobile-xray-mcp
+            \`\`\``;
+            } else if ('${{ inputs.publish_to_npm }}' === 'false') {
+              body += `
+            ⏭️ **npm**: Skipped (as requested)
+
+            To publish later, promote this release or run the publish workflow.`;
+            } else {
+              body += `
+            ❌ **npm**: Publication failed - check workflow logs`;
+            }
+
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: body
+            });
