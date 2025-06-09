@@ -3,9 +3,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import packageJSON from '../package.json'
-import { withCheckSupportedPlatformsTool } from './tools/checkSupportedPlatforms.js'
-import { withIosSimulatorScreenshotTool } from './tools/getIosSimulatorScreenshot.tool.js'
-import { withSimulatorListTool } from './tools/getSimulatorList.js'
+import { withCheckSupportedPlatformsTool } from './tools/checkSupportedPlatforms.tool'
+import { withSimulatorListTool } from './tools/getSimulatorList.tool'
+import { withIosSimulatorScreenshotTool } from './tools/getSimulatorScreenshot.tool'
 
 // Create an MCP server
 const server = new McpServer({

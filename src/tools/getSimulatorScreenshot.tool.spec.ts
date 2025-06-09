@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals'
 import fs from 'node:fs/promises'
 import * as shellUtils from '../utils/shell'
-import { handler } from './getSimulatorScreenshot.tool.js'
+import { handler } from './getSimulatorScreenshot.tool'
 
 // Mock the dependencies
 jest.mock('../utils/shell', () => ({

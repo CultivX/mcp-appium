@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals'
 import * as shellUtils from '../utils/shell'
-import { handler } from './getSimulatorList.tool.js'
+import { handler } from './getSimulatorList.tool'
 
 // Mock the shell utility
 jest.mock('../utils/shell', () => ({
