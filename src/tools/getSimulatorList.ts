@@ -33,14 +33,21 @@ export const handler = async (args: InputType): Promise<CallToolResult> => {
             string,
             {
               name: string
-              deviceId: string
-              state: 'booted' | 'available'
+              udid: string
+              state: string
               platform: 'ios'
             }[]
           >
         }
       ).devices
-    ).flat()
+    )
+      .flat()
+      .map(device => ({
+        name: device.name,
+        deviceId: device.udid,
+        state: device.state,
+        platform: 'ios',
+      }))
   } else if (args.platform === 'android') {
     // Get all Android virtual devices
     const { stdout: avdsOutput, stderr: avdsStderr } =
@@ -55,13 +62,14 @@ export const handler = async (args: InputType): Promise<CallToolResult> => {
     const { stdout: adbOutput, stderr: adbStderr } =
       await runShellCommand('adb devices')
     process.stderr.write(adbStderr)
+
     const emulatorLines = adbOutput
       .split('\n')
       .filter(line => line.startsWith('emulator-'))
       .map(line => line.split('\t')[0])
 
     // 3. Map emulator IDs to AVD names
-    const runningAvds: Set<string> = new Set()
+    const runningAvds: Map<string, string | undefined> = new Map() // AVD name -> emulator ID
 
     for (const emulatorId of emulatorLines) {
       try {
@@ -71,7 +79,7 @@ export const handler = async (args: InputType): Promise<CallToolResult> => {
 
         const name = avdName.split(/\r?\n/)[0]?.trim()
         if (name) {
-          runningAvds.add(name)
+          runningAvds.set(name, emulatorId)
         }
       } catch (err) {
         // Skip if command fails (e.g. emulator shutting down)
@@ -79,12 +87,16 @@ export const handler = async (args: InputType): Promise<CallToolResult> => {
       }
     }
 
-    devices = allAvds.map(avd => ({
-      name: avd,
-      deviceId: avd,
-      state: runningAvds.has(avd) ? 'booted' : 'available',
-      platform: 'android',
-    }))
+    devices = allAvds.map(avd => {
+      const emulatorId = runningAvds.get(avd)
+      const isBooted = runningAvds.has(avd)
+      return {
+        name: avd,
+        deviceId: emulatorId ?? avd, // Use emulator ID for booted devices, AVD name for available/shutdown
+        state: isBooted ? 'booted' : 'available',
+        platform: 'android' as const,
+      }
+    })
 
     if (args.state === 'booted') {
       devices = devices.filter(device => device.state === 'booted')
@@ -105,14 +117,7 @@ export const handler = async (args: InputType): Promise<CallToolResult> => {
     content: [
       {
         type: 'text',
-        text: JSON.stringify(
-          devices.map(device => ({
-            name: device.name,
-            deviceId: device.deviceId,
-            state: device.state,
-            platform: device.platform,
-          }))
-        ),
+        text: JSON.stringify(devices),
       },
     ],
   }

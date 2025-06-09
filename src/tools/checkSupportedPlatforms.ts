@@ -89,8 +89,9 @@ export const withCheckSupportedPlatformsTool = (server: McpServer) => {
   server.tool(
     'check_supported_platforms',
     'Check which platforms are supported',
-    {},
-    {},
+    {
+      readOnlyHint: true,
+    },
     handler
   )
 }

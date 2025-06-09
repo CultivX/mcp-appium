@@ -24,13 +24,13 @@ describe('getSimulatorList handler', () => {
         'iOS 17.0': [
           {
             name: 'iPhone 14',
-            deviceId: 'ABC123-DEF456',
+            udid: 'ABC123-DEF456',
             state: 'booted',
             platform: 'ios',
           },
           {
             name: 'iPhone 15',
-            deviceId: 'GHI789-JKL012',
+            udid: 'GHI789-JKL012',
             state: 'available',
             platform: 'ios',
           },
@@ -38,7 +38,7 @@ describe('getSimulatorList handler', () => {
         'iOS 16.0': [
           {
             name: 'iPad Air',
-            deviceId: 'MNO345-PQR678',
+            udid: 'MNO345-PQR678',
             state: 'available',
             platform: 'ios',
           },
@@ -147,13 +147,13 @@ describe('getSimulatorList handler', () => {
       expect(devices).toEqual([
         {
           name: 'Pixel_7_API_34',
-          deviceId: 'Pixel_7_API_34',
+          deviceId: 'emulator-5554',
           state: 'booted',
           platform: 'android',
         },
         {
           name: 'Pixel_Tablet_API_34',
-          deviceId: 'Pixel_Tablet_API_34',
+          deviceId: 'emulator-5556',
           state: 'booted',
           platform: 'android',
         },
@@ -181,8 +181,11 @@ describe('getSimulatorList handler', () => {
       const devices = JSON.parse((result.content[0] as any).text)
       expect(devices).toHaveLength(3) // All AVDs
       expect(devices[0].state).toBe('booted') // Pixel_7_API_34 is running
+      expect(devices[0].deviceId).toBe('emulator-5554') // Should use emulator ID for booted device
       expect(devices[1].state).toBe('available') // Others are available
+      expect(devices[1].deviceId).toBe('Pixel_Tablet_API_34') // Should use AVD name for non-booted device
       expect(devices[2].state).toBe('available')
+      expect(devices[2].deviceId).toBe('Nexus_5_API_30') // Should use AVD name for non-booted device
     })
 
     it('should handle multiline avd name output correctly', async () => {
