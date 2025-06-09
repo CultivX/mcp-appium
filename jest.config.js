@@ -18,7 +18,8 @@ export default {
     '!src/**/*.test.ts',
     '!src/**/*.spec.ts',
   ],
-  moduleNameMapping: {
+  moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^(\\.{1,2}/.*)\\.js$': '$1',
   },
-};
+}

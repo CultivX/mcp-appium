@@ -1,11 +1,13 @@
 {
   "name": "@cultivx/mobile-xray-mcp",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "An open source TypeScript project",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
-  "bugs": "https://github.com/CultivX/mobile-xray-mcp/issues",
+  "bugs": {
+    "url": "https://github.com/CultivX/mobile-xray-mcp/issues"
+  },
   "bin": {
     "mobile-xray-mcp": "dist/index.js"
   },
@@ -30,11 +32,11 @@
     "appium",
     "mcp"
   ],
-  "author": "",
+  "author": "Karel Malbroukou <karel@cultivx.com.au>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/CultivX/mobile-xray-mcp"
+    "url": "git+https://github.com/CultivX/mobile-xray-mcp.git"
   },
   "homepage": "https://github.com/CultivX/mobile-xray-mcp",
   "files": [

@@ -1,0 +1,131 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { CallToolResult } from '@modelcontextprotocol/sdk/types'
+import z from 'zod'
+import { runShellCommand } from '../utils/shell.js'
+
+const inputSchema = z.object({
+  platform: z
+    .enum(['ios', 'android'])
+    .describe('The platform of the simulator'),
+  state: z.enum(['booted', 'available']).describe('The state of the simulator'),
+})
+
+type InputType = z.infer<typeof inputSchema>
+
+export const handler = async (args: InputType): Promise<CallToolResult> => {
+  let devices: {
+    name: string
+    deviceId: string
+    state: string
+    platform: InputType['platform']
+  }[] = []
+
+  if (args.platform === 'ios') {
+    const { stdout, stderr } = await runShellCommand(
+      `xcrun simctl list -j devices ${args.state}`
+    )
+    process.stderr.write(stderr)
+
+    devices = Object.values(
+      (
+        JSON.parse(stdout) as {
+          devices: Record<
+            string,
+            {
+              name: string
+              deviceId: string
+              state: 'booted' | 'available'
+              platform: 'ios'
+            }[]
+          >
+        }
+      ).devices
+    ).flat()
+  } else if (args.platform === 'android') {
+    // Get all Android virtual devices
+    const { stdout: avdsOutput, stderr: avdsStderr } =
+      await runShellCommand(`emulator -list-avds`)
+    process.stderr.write(avdsStderr)
+
+    const allAvds = avdsOutput
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+
+    const { stdout: adbOutput, stderr: adbStderr } =
+      await runShellCommand('adb devices')
+    process.stderr.write(adbStderr)
+    const emulatorLines = adbOutput
+      .split('\n')
+      .filter(line => line.startsWith('emulator-'))
+      .map(line => line.split('\t')[0])
+
+    // 3. Map emulator IDs to AVD names
+    const runningAvds: Set<string> = new Set()
+
+    for (const emulatorId of emulatorLines) {
+      try {
+        const { stdout: avdName, stderr: avdNameStderr } =
+          await runShellCommand(`adb -s ${emulatorId} emu avd name`)
+        process.stderr.write(avdNameStderr)
+
+        const name = avdName.split(/\r?\n/)[0]?.trim()
+        if (name) {
+          runningAvds.add(name)
+        }
+      } catch (err) {
+        // Skip if command fails (e.g. emulator shutting down)
+        continue
+      }
+    }
+
+    devices = allAvds.map(avd => ({
+      name: avd,
+      deviceId: avd,
+      state: runningAvds.has(avd) ? 'booted' : 'available',
+      platform: 'android',
+    }))
+
+    if (args.state === 'booted') {
+      devices = devices.filter(device => device.state === 'booted')
+    }
+  } else {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: 'Invalid platform',
+        },
+      ],
+      isError: true,
+    }
+  }
+
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          devices.map(device => ({
+            name: device.name,
+            deviceId: device.deviceId,
+            state: device.state,
+            platform: device.platform,
+          }))
+        ),
+      },
+    ],
+  }
+}
+
+export const withSimulatorListTool = (server: McpServer) => {
+  server.tool(
+    'get_simulator_list',
+    'Get a list of all simulators',
+    inputSchema.shape,
+    {
+      readOnlyHint: true,
+    },
+    handler
+  )
+}
