@@ -1,6 +1,6 @@
-import { runShellCommand } from '@/utils/shell'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp'
 import { CallToolResult } from '@modelcontextprotocol/sdk/types'
+import { runShellCommand } from '../utils/shell.js'
 
 export interface PlatformSupport {
   iosSupported: boolean

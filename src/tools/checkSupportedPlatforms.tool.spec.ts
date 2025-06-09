@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals'
 import * as shellUtils from '../utils/shell'
-import { handler } from './checkSupportedPlatforms'
+import { handler } from './checkSupportedPlatforms.tool.js'
 
 // Mock the shell utility
 jest.mock('../utils/shell', () => ({
@@ -171,7 +171,7 @@ describe('checkSupportedPlatforms handler', () => {
     // Verify it matches CallToolResult interface
     expect(result).toHaveProperty('content')
     expect(Array.isArray(result.content)).toBe(true)
-    expect(result.content.every(item => item.type === 'text')).toBe(true)
+    expect(result.content.every((item: any) => item.type === 'text')).toBe(true)
     expect(result.isError).toBeUndefined() // Should not be set when successful
   })
 })
