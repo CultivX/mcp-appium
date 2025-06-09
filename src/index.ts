@@ -3,6 +3,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import packageJSON from '../package.json'
+import { withCheckSupportedPlatformsTool } from './tools/checkSupportedPlatforms.js'
 import { withIosSimulatorScreenshotTool } from './tools/getIosSimulatorScreenshot.tool.js'
 import { withSimulatorListTool } from './tools/getSimulatorList.js'
 
@@ -15,6 +16,7 @@ const server = new McpServer({
 // Register tools
 withIosSimulatorScreenshotTool(server)
 withSimulatorListTool(server)
+withCheckSupportedPlatformsTool(server)
 
 // Start receiving messages on stdin and sending messages on stdout
 const transport = new StdioServerTransport()
