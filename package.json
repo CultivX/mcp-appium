@@ -40,7 +40,7 @@
   },
   "homepage": "https://github.com/CultivX/mobile-xray-mcp",
   "files": [
-    "dist",
+    "dist/**/*",
     "README.md",
     "LICENSE"
   ],

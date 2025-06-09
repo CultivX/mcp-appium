@@ -1,0 +1,217 @@
+name: Auto Release RC
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Build project
+        run: npm run build
+
+  create-rc-release:
+    name: Create RC Release
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Generate version
+        id: version
+        run: |
+          # Get current version from package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+
+          # Get commit short SHA
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+
+          # Get commit count since last tag (or total if no tags)
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+
+          # Create RC version: current_version-rc.commit_count.commit_sha
+          RC_VERSION="${CURRENT_VERSION}-rc.${COMMIT_COUNT}.${COMMIT_SHA}"
+
+          echo "current_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+          echo "rc_version=${RC_VERSION}" >> $GITHUB_OUTPUT
+          echo "commit_sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "commit_count=${COMMIT_COUNT}" >> $GITHUB_OUTPUT
+
+          echo "Generated RC version: ${RC_VERSION}"
+
+      - name: Update package.json version
+        run: |
+          # Temporarily update package.json for the build
+          npm version ${{ steps.version.outputs.rc_version }} --no-git-tag-version
+
+      - name: Create release package
+        run: |
+          echo "Creating release package for version ${{ steps.version.outputs.rc_version }}..."
+          mkdir -p release-package
+
+          # Copy essential files
+          cp -r dist release-package/
+          cp package.json package-lock.json README.md LICENSE release-package/
+
+          # Install production dependencies
+          cd release-package
+          npm ci --production --silent
+
+          # Create tarball
+          cd ..
+          tar -czf mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz -C release-package .
+
+          # Show package info
+          echo "Package created: mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz"
+          ls -lh mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get commits since last release
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            # No previous tags, get all commits
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --reverse --max-count=10)
+          else
+            # Get commits since last tag
+            CHANGELOG=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)" --reverse)
+          fi
+
+          # Escape newlines for GitHub output
+          CHANGELOG="${CHANGELOG//'%'/'%25'}"
+          CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
+          CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+
+          echo "changelog=${CHANGELOG}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.version.outputs.rc_version }}
+          release_name: 'Release Candidate v${{ steps.version.outputs.rc_version }}'
+          body: |
+            🚀 **Release Candidate v${{ steps.version.outputs.rc_version }}**
+
+            **Auto-generated from commit:** ${{ steps.version.outputs.commit_sha }}
+            **Build:** #${{ github.run_number }}
+
+            ## Changes since last release:
+            ${{ steps.changelog.outputs.changelog }}
+
+            ## Usage with MCP:
+
+            **Add to your MCP configuration:**
+            ```json
+            {
+              "mcpServers": {
+                "mobile-xray": {
+                  "command": "npx",
+                  "args": [
+                    "--yes",
+                    "https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.rc_version }}/mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz"
+                  ]
+                }
+              }
+            }
+            ```
+
+            **Or download and run locally:**
+            ```bash
+            wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.rc_version }}/mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz
+            tar -xzf mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz
+            cd mobile-xray-mcp-${{ steps.version.outputs.rc_version }}
+            node dist/index.js
+            ```
+
+            **Or use with npx (when published):**
+            ```bash
+            npx @cultivx/mobile-xray-mcp
+            ```
+
+            ---
+
+            ⚠️ **This is a Release Candidate** - use for testing purposes.
+          draft: false
+          prerelease: true
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz
+          asset_name: mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Comment on commit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: `🚀 **RC Release Created!**
+
+            **Version**: v${{ steps.version.outputs.rc_version }}
+            **Download**: [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.rc_version }})
+
+            **Quick MCP Config:**
+            \`\`\`json
+            {
+              "mcpServers": {
+                "mobile-xray": {
+                  "command": "npx",
+                  "args": ["--yes", "https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.rc_version }}/mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz"]
+                }
+              }
+            }
+            \`\`\`
+            `
+            });

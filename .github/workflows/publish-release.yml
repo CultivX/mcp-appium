@@ -1,0 +1,219 @@
+name: Publish Release to npm
+
+on:
+  release:
+    types: [released]
+
+jobs:
+  publish-to-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    if: github.event.release.prerelease == false
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Extract version from git tag (remove 'v' prefix if present)
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Extracted version: ${VERSION}"
+
+      - name: Download release artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Downloading release artifact for version ${{ steps.version.outputs.version }}..."
+
+          # List all assets for this release
+          echo "Available assets:"
+          gh release view v${{ steps.version.outputs.version }} --repo ${{ github.repository }} --json assets --jq '.assets[].name'
+
+          # Find the mobile-xray-mcp tarball
+          ASSET_NAME=$(gh release view v${{ steps.version.outputs.version }} --repo ${{ github.repository }} --json assets --jq -r '.assets[] | select(.name | contains("mobile-xray-mcp-")) | .name')
+
+          if [ -z "$ASSET_NAME" ]; then
+            echo "❌ No mobile-xray-mcp release artifact found!"
+            echo "Available assets:"
+            gh release view v${{ steps.version.outputs.version }} --repo ${{ github.repository }} --json assets --jq '.assets[].name'
+            exit 1
+          fi
+
+          echo "Found asset: $ASSET_NAME"
+
+          # Download the artifact
+          gh release download v${{ steps.version.outputs.version }} --repo ${{ github.repository }} --pattern "*mobile-xray-mcp-*" --output release-artifact.tar.gz
+
+          # Extract the artifact
+          mkdir -p npm-package
+          tar -xzf release-artifact.tar.gz -C npm-package
+
+          echo "✅ Downloaded and extracted release artifact"
+          ls -la npm-package/
+
+      - name: Verify package contents
+        run: |
+          cd npm-package
+          echo "📦 Package.json contents:"
+          cat package.json | jq -r '{"name": .name, "version": .version, "main": .main, "bin": .bin}'
+          echo ""
+          echo "📁 Files in package:"
+          find . -type f | head -20
+          echo ""
+          echo "🏗️  Dist directory:"
+          ls -la dist/ || echo "No dist directory found"
+          echo ""
+          echo "📊 Package size:"
+          du -sh .
+
+      - name: Update package version for npm
+        run: |
+          cd npm-package
+          # Ensure package.json has the correct version (strip RC info if present)
+          npm version ${{ steps.version.outputs.version }} --no-git-tag-version
+          echo "✅ Updated package.json to stable version ${{ steps.version.outputs.version }}"
+          echo "📋 Final package.json version info:"
+          cat package.json | jq -r '{"name": .name, "version": .version}'
+
+      - name: Test package locally
+        run: |
+          cd npm-package
+          echo "🧪 Testing package structure..."
+          npm pack --dry-run
+
+      - name: Publish to npm
+        run: |
+          cd npm-package
+          echo "🚀 Publishing to npm..."
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify publication
+        run: |
+          echo "🔍 Verifying publication..."
+          sleep 15  # Wait for npm to propagate
+          npm info @cultivx/mobile-xray-mcp@${{ steps.version.outputs.version }} --json | jq -r '{"name": .name, "version": .version, "publishedAt": .time.modified}' || echo "Package info not yet available (may take a few minutes)"
+
+  update-release-notes:
+    name: Update Release Notes
+    runs-on: ubuntu-latest
+    needs: publish-to-npm
+    if: github.event.release.prerelease == false
+
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Get release info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📋 Current release info:"
+          gh release view v${{ steps.version.outputs.version }} --repo ${{ github.repository }} --json name,tagName,isPrerelease,publishedAt
+
+      - name: Update release with npm info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: release } = await github.rest.repos.getRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: context.payload.release.id,
+            });
+
+            // Check if npm section already exists
+            if (release.body.includes('📦 Published to npm!')) {
+              console.log('Release notes already updated with npm info');
+              return;
+            }
+
+            const npmInstallSection = `
+
+            ---
+
+            ## 📦 Published to npm!
+
+            **Install via npx (recommended for MCP):**
+            \`\`\`bash
+            npx @cultivx/mobile-xray-mcp
+            \`\`\`
+
+            **MCP Configuration:**
+            \`\`\`json
+            {
+              "mcpServers": {
+                "mobile-xray": {
+                  "command": "npx",
+                  "args": ["-y", "@cultivx/mobile-xray-mcp"]
+                }
+              }
+            }
+            \`\`\`
+
+            **Alternative - Download Release:**
+            \`\`\`bash
+            wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/mobile-xray-mcp-${{ steps.version.outputs.version }}.tar.gz
+            tar -xzf mobile-xray-mcp-${{ steps.version.outputs.version }}.tar.gz
+            cd mobile-xray-mcp
+            node dist/index.js
+            \`\`\`
+
+            **npm Package**: [View on npm](https://www.npmjs.com/package/@cultivx/mobile-xray-mcp)`;
+
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: context.payload.release.id,
+              body: release.body + npmInstallSection,
+            });
+
+      - name: Create success comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.payload.release.target_commitish,
+              body: `🎉 **Release v${{ steps.version.outputs.version }} Published Successfully!**
+
+              ✅ **npm**: Published to [@cultivx/mobile-xray-mcp@${{ steps.version.outputs.version }}](https://www.npmjs.com/package/@cultivx/mobile-xray-mcp)
+              ✅ **GitHub**: [Release with downloadable artifact](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }})
+              ✅ **Source**: Used pre-built release artifact (downloaded with gh CLI)
+
+              **Quick Start:**
+              \`\`\`bash
+              npx @cultivx/mobile-xray-mcp
+              \`\`\`
+              `
+            });
+
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    needs: [publish-to-npm, update-release-notes]
+    if: always()
+
+    steps:
+      - name: Summary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🚀 Publish workflow completed!"
+          echo "📦 Release artifact was downloaded using gh CLI"
+          echo "✅ No rebuild required - used tested artifact"
+          echo ""
+          echo "📋 Final release info:"
+          gh release view v${{ needs.publish-to-npm.outputs.version || github.event.release.tag_name }} --repo ${{ github.repository }} --json name,tagName,publishedAt --jq '{"name": .name, "tag": .tagName, "published": .publishedAt}'
