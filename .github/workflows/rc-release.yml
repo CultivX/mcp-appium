@@ -3,6 +3,10 @@ name: Auto Release RC
 on:
   push:
     branches: [main]
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/**'
 
 jobs:
   test:

@@ -24,21 +24,59 @@ This tool bridges the gap between development and design by bringing mobile app 
 - 🤖 **AI-Powered**: Integrates seamlessly with AI coding assistants for intelligent analysis
 - 👨‍💻 **Developer-Focused**: Built by developers who understand the mobile development workflow
 
-## How to Use
+## ⚡ Quick Start
+
+**Prerequisites:** Node.js 18+, iOS Simulator or Android Emulator
+
+**Add to your IDE config file:**
+
+```json
+{
+  "mcpServers": {
+    "mobile-xray": {
+      "command": "npx",
+      "args": ["-y", "@cultivx/mobile-xray-mcp"]
+    }
+  }
+}
+```
+
+**Test:** Restart IDE → Start simulator → Ask: `"Take a screenshot of my iOS simulator"`
+
+## Setup Details
 
 ### Prerequisites
 
-You need to have **Node.js 18+** installed to use the Mobile Xray MCP server.
+**System Requirements:**
+
+- **Node.js 18+** (check with `node --version`)
+- **macOS 10.15+** (for iOS development)
+- **macOS/Windows/Linux** (for Android development)
 
 **For iOS Development:**
 
-- Install Xcode Command Line Tools: `xcode-select --install`
+- Xcode Command Line Tools: `xcode-select --install`
 - Xcode with iOS Simulator support
+- At least one iOS Simulator installed
 
 **For Android Development:**
 
-- Install Android Studio (which includes `adb` and `emulator` commands)
-- Ensure Android SDK tools are in your PATH
+- Android Studio (includes `adb` and `emulator` commands)
+- Android SDK tools in your PATH
+- At least one Android Virtual Device (AVD) created
+
+**Verify Your Setup:**
+
+```bash
+# Test Node.js version
+node --version  # Should show v18.0.0 or higher
+
+# Test iOS tools (macOS only)
+xcrun simctl list devices | head -5
+
+# Test Android tools
+adb version
+```
 
 ### Setup Instructions
 
@@ -52,22 +90,6 @@ You need to have **Node.js 18+** installed to use the Mobile Xray MCP server.
 
 > **Note**: This MCP server works with any AI coding assistant that supports the Model Context Protocol.
 
-### Configuration
-
-Add the following to your MCP configuration file:
-
-```json
-{
-  "mcpServers": {
-    [.. other mcp config ..]
-    "mobile-xray": {
-      "command": "npx",
-      "args": ["-y", "@cultivx/mobile-xray-mcp"]
-    }
-  }
-}
-```
-
 ### Basic Usage
 
 1. **Start your mobile simulator/emulator**
@@ -75,15 +97,66 @@ Add the following to your MCP configuration file:
 3. **Ask for a screenshot**: "Can you take a screenshot of my iOS simulator?"
 4. **Get AI analysis**: "What can I improve about this screen's UX?"
 
+## Example Prompts
+
+### Platform & Setup
+
+```
+Check which platforms are currently supported by the mobile-xray-mcp on my machine
+```
+
+### Accessibility
+
+```
+Take a screenshot of my iOS simulator and tell me what accessibility features I should add
+```
+
+```
+Screenshot my current screen and check if the color contrast meets accessibility standards
+```
+
+### UI/UX Feedback
+
+```
+Take a screenshot of the current iOS simulator, and find the code that is related to it, then propose some improvements without making any changes
+```
+
+```
+Take a screenshot of my app and suggest improvements for mobile-first design principles
+```
+
+```
+Analyze the current screen layout and suggest improvements for better user flow
+```
+
+### Change and Verify
+
+```
+Make changes and verify your changes work well by taking a screenshot
+```
+
+## Troubleshooting & FAQ
+
+**Issues:**
+
+- **"No simulators found"**: Start your simulator with `open -a Simulator` (iOS) or check `adb devices` (Android)
+- **MCP not connecting**: Restart your IDE after adding config, verify JSON syntax is correct
+- **"Command not found"**: Install Xcode Command Line Tools (`xcode-select --install`) or ensure Android SDK is in PATH
+
+**Common Questions:**
+
+- **Frameworks**: Works with React Native, Flutter, Xamarin, or any app in simulator/emulator
+- **Physical devices**: Not yet supported, simulators/emulators only
+- **Privacy**: The MCP server operates locally and doesn't collect or send any data. Screenshot images are sent to your AI service by your IDE for analysis
+- **Offline**: Screenshots work offline, AI analysis needs internet connection
+
 ## Current Features
 
 ✅ **Platform Detection**: Automatically checks which mobile platforms are available on your system
 
-✅ **Privacy First**: All processing happens locally - no data sent to external servers
+✅ **Privacy First**: All processing performed by the MCP server happens locally - no data sent to external servers. However, screenshot images will be sent to your AI service (Claude, ChatGPT, etc.) for analysis, as handled by your IDE's AI agent
 
 ✅ **Screenshot Capture**: Take instant screenshots of iOS simulators and Android emulators
-
-✅ **Device Management**: List and manage available simulators and emulators
 
 ✅ **Cross-Platform Support**: Works with both iOS and Android development environments
 
