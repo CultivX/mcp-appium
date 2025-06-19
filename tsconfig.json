@@ -28,7 +28,6 @@
     "noEmitOnError": true,
     "preserveWatchOutput": true,
     "pretty": true,
-    "incremental": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
