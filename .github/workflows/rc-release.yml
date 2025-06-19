@@ -110,7 +110,6 @@ jobs:
 
           # Show package info
           echo "Package created: mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz"
-          ls -lh mobile-xray-mcp-${{ steps.version.outputs.rc_version }}.tar.gz
 
       - name: Generate changelog
         id: changelog
