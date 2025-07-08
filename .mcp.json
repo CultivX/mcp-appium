@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "LocalMobileXrayMCP": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "tsx",
+        "src/index.ts"
+      ],
+      "env": {}
+    }
+  }
+}

@@ -13,7 +13,7 @@ export const handler = async (): Promise<CallToolResult> => {
   try {
     await runShellCommand('xcrun --version')
     iosSupported = true
-  } catch (error) {
+  } catch {
     // xcrun not available
     iosSupported = false
   }
@@ -25,7 +25,7 @@ export const handler = async (): Promise<CallToolResult> => {
     await runShellCommand('adb --version')
     await runShellCommand('emulator -version')
     androidSupported = true
-  } catch (error) {
+  } catch {
     // Either adb or emulator (or both) not available
     androidSupported = false
   }
