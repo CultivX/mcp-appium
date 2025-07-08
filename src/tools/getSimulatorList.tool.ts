@@ -81,7 +81,7 @@ export const handler = async (args: InputType): Promise<CallToolResult> => {
         if (name) {
           runningAvds.set(name, emulatorId)
         }
-      } catch (err) {
+      } catch {
         // Skip if command fails (e.g. emulator shutting down)
         continue
       }

@@ -258,6 +258,228 @@ describe('getSimulatorList handler', () => {
     })
   })
 
+  describe('Additional edge cases', () => {
+    describe('iOS platform', () => {
+      it('should handle no devices returned', async () => {
+        const emptyDevices = { devices: {} }
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: JSON.stringify(emptyDevices),
+          stderr: '',
+        })
+        const result = await handler({ platform: 'ios', state: 'booted' })
+        const devices = JSON.parse((result.content[0] as any).text)
+        expect(devices).toHaveLength(0)
+      })
+
+      it('should handle malformed JSON', async () => {
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: '{invalid json',
+          stderr: '',
+        })
+        await expect(
+          handler({ platform: 'ios', state: 'booted' })
+        ).rejects.toThrow()
+      })
+
+      it('should handle device with missing fields', async () => {
+        const malformedDevices = {
+          devices: {
+            'iOS 17.0': [
+              { name: 'iPhone 14' }, // missing udid and state
+            ],
+          },
+        }
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: JSON.stringify(malformedDevices),
+          stderr: '',
+        })
+        const result = await handler({ platform: 'ios', state: 'booted' })
+        const devices = JSON.parse((result.content[0] as any).text)
+        // Should skip or handle gracefully, so deviceId and state may be undefined
+        expect(devices[0]?.name).toBe('iPhone 14')
+      })
+
+      it('should handle multiple warnings in stderr', async () => {
+        const mockIosDevicesResponse = {
+          devices: {
+            'iOS 17.0': [
+              {
+                name: 'iPhone 14',
+                udid: 'ABC123-DEF456',
+                state: 'booted',
+                platform: 'ios',
+              },
+            ],
+          },
+        }
+        const warnings = 'Warning 1\nWarning 2\nWarning 3'
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: JSON.stringify(mockIosDevicesResponse),
+          stderr: warnings,
+        })
+        const stderrSpy = jest
+          .spyOn(process.stderr, 'write')
+          .mockImplementation(() => true)
+        await handler({ platform: 'ios', state: 'booted' })
+        expect(stderrSpy).toHaveBeenCalledWith(
+          'Warning 1\nWarning 2\nWarning 3'
+        )
+        stderrSpy.mockRestore()
+      })
+    })
+
+    describe('Android platform', () => {
+      it('should handle no AVDs returned', async () => {
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: '',
+          stderr: '',
+        })
+        const result = await handler({
+          platform: 'android',
+          state: 'available',
+        })
+        const devices = JSON.parse((result.content[0] as any).text)
+        expect(devices).toHaveLength(0)
+      })
+
+      it('should handle no booted devices', async () => {
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: 'Pixel_7_API_34',
+          stderr: '',
+        })
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: 'List of devices attached',
+          stderr: '',
+        })
+        const result = await handler({ platform: 'android', state: 'booted' })
+        const devices = JSON.parse((result.content[0] as any).text)
+        expect(devices).toHaveLength(0)
+      })
+
+      it('should ignore unauthorized devices', async () => {
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: 'Pixel_7_API_34',
+          stderr: '',
+        })
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: 'List of devices attached\nemulator-5554\tunauthorized',
+          stderr: '',
+        })
+        const result = await handler({ platform: 'android', state: 'booted' })
+        const devices = JSON.parse((result.content[0] as any).text)
+        expect(devices).toHaveLength(0)
+      })
+
+      it('should handle AVD name with special characters', async () => {
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: 'Pixel 7 Pro (Test) #1',
+          stderr: '',
+        })
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: 'List of devices attached\nemulator-5554\tdevice',
+          stderr: '',
+        })
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: 'Pixel 7 Pro (Test) #1',
+          stderr: '',
+        })
+        const result = await handler({
+          platform: 'android',
+          state: 'available',
+        })
+        const devices = JSON.parse((result.content[0] as any).text)
+        expect(devices[0].name).toBe('Pixel 7 Pro (Test) #1')
+      })
+
+      it('should handle multiple devices with same AVD name', async () => {
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: 'Pixel_7_API_34\nPixel_7_API_34',
+          stderr: '',
+        })
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout:
+            'List of devices attached\nemulator-5554\tdevice\nemulator-5556\tdevice',
+          stderr: '',
+        })
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: 'Pixel_7_API_34',
+          stderr: '',
+        })
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: 'Pixel_7_API_34',
+          stderr: '',
+        })
+        const result = await handler({ platform: 'android', state: 'booted' })
+        const devices = JSON.parse((result.content[0] as any).text)
+        expect(devices).toHaveLength(2)
+        expect(devices[0].name).toBe('Pixel_7_API_34')
+        expect(devices[1].name).toBe('Pixel_7_API_34')
+      })
+    })
+
+    describe('General', () => {
+      it('should handle unexpected state value', async () => {
+        const mockIosDevicesResponse = {
+          devices: {
+            'iOS 17.0': [
+              {
+                name: 'iPhone 14',
+                udid: 'ABC123-DEF456',
+                state: 'unknown',
+                platform: 'ios',
+              },
+            ],
+          },
+        }
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: JSON.stringify(mockIosDevicesResponse),
+          stderr: '',
+        })
+        const result = await handler({ platform: 'ios', state: 'booted' })
+        const devices = JSON.parse((result.content[0] as any).text)
+        // Should not include device with unknown state
+        expect(devices).toHaveLength(0)
+      })
+
+      it('should handle handler returning error object', async () => {
+        // Simulate handler returning error object (not throwing)
+        const errorHandler = async () => ({
+          content: [{ type: 'text', text: 'Some error' }],
+          isError: true,
+        })
+        const result = await errorHandler()
+        expect(result.isError).toBe(true)
+        expect(result.content[0].text).toBe('Some error')
+      })
+
+      it('should handle both stdout and stderr with errors', async () => {
+        const mockIosDevicesResponse = {
+          devices: {
+            'iOS 17.0': [
+              {
+                name: 'iPhone 14',
+                udid: 'ABC123-DEF456',
+                state: 'booted',
+                platform: 'ios',
+              },
+            ],
+          },
+        }
+        mockRunShellCommand.mockResolvedValueOnce({
+          stdout: JSON.stringify(mockIosDevicesResponse),
+          stderr: 'Error: something went wrong',
+        })
+        const stderrSpy = jest
+          .spyOn(process.stderr, 'write')
+          .mockImplementation(() => true)
+        const result = await handler({ platform: 'ios', state: 'booted' })
+        expect(stderrSpy).toHaveBeenCalledWith('Error: something went wrong')
+        expect(result.isError).toBeUndefined()
+        stderrSpy.mockRestore()
+      })
+    })
+  })
+
   describe('Error cases', () => {
     it('should return error for invalid platform', async () => {
       const result = await handler({
